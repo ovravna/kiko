@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 termios="0.3.1"
 ascii="0.7"
+scan_fmt = "0.2.4"
