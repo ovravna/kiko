@@ -1,4 +1,4 @@
-use std::io::{stdin, stdout, Read, Write};
+use std::io::{stdin, stdout, stderr, Read, Write};
 use std::io;
 use std::iter;
 use termios::*;
@@ -10,25 +10,35 @@ macro_rules! io {
     ($t:ty) => { Result<$t, io::Error> }
 }
 
-macro_rules! ctrl_key {
-    ($e:expr) => { $e & 0x1f }
-}
-
-#[repr(u8)]
+#[derive(Debug)]
 enum Key { 
-    Up = b'A', 
-    Down = b'B',
-    Right = b'C',
-    Left = b'D'
+    Up, 
+    Down,
+    Right,
+    Left,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    Delete,
+    Char(u8),
+    Ctrl(u8)
 }
 
 const STDIN_FD: i32 = 0;
+
+struct Row {
+    size: usize,
+    chars: String,
+}
 
 struct EditorConfig {
     cx: usize,
     cy: usize,
     height: usize,
     width: usize,
+    numrows: usize,
+    row: Row,
     orig_termios: Termios
 }
 
@@ -38,36 +48,91 @@ impl Drop for EditorConfig {
     }
 }
 
-fn editor_read_key(reader: &mut impl Read) -> io!(u8) {
-    let mut res = [0];
-    let mut nread = 0;
-    while nread <= 0 {
-        nread = reader.read(&mut res)?;
+
+fn editor_read_key(reader: &mut impl Read) -> io!(Key) {
+    let mut seq = [0; 4];
+    while let Ok(0) = reader.read(&mut seq) {}
+
+    stderr().write(&seq)?;
+
+    let c = seq[0];
+    
+    let key = match c {
+
+        e if e == ctrl_key(b'q') => Key::Ctrl(b'q'),
+        b'k' => Key::Up,
+        b'j' => Key::Down,
+        b'l' => Key::Right,
+        b'h' => Key::Left,
+        c => Key::Char(c)
+    };
+
+    if seq[0] == 0x1b {
+        if seq[1] == b'[' {
+            let key: Key = if seq[3] == b'~' { 
+                match seq[2] as char {
+                    '1' => Key::Home,
+                    '3' => Key::Delete,
+                    '4' => Key::End,
+                    '5' => Key::PageUp,
+                    '6' => Key::PageDown,
+                    '7' => Key::Home,
+                    '8' => Key::End,
+                    _ => panic!(),
+                }
+            }
+            else {
+                match seq[2] as char {
+                    'A' => Key::Up,
+                    'B' => Key::Down,
+                    'C' => Key::Right,
+                    'D' => Key::Left,
+                    'H' => Key::Home,
+                    'F' => Key::End,
+                    _ => panic!()
+                }
+            };
+
+            return Ok(key);
+        }
+    } 
+    else if seq[0] == b'O' {
+        let key = match seq[1] as char {
+            'H' => Key::Home,
+            'F' => Key::End,
+            _ => panic!()
+        };
+        return Ok(key);
     }
-    return Ok(res[0]);
+    
+    return Ok(key);
 }
+    
 
 fn editor_process_keypress(mut conf: &mut EditorConfig) -> io!(bool) {
 
-    let c = editor_read_key(&mut stdin())?;
+    let key = editor_read_key(&mut stdin())?;
 
-    if c == ctrl_key!(b'q') {
-        editor_clean_screen(&mut stdout())?;
-        return Ok(false);
-    }
+    writeln!(stderr(), " {:?}", key)?;
 
-    if b"hjklABCD".contains(&c) {
-        
-        let key = match c {
-            b'k' | b'A' => Key::Up,
-            b'j' | b'B' => Key::Down,
-            b'l' | b'C' => Key::Right,
-            b'h' | b'D' => Key::Left,
-            _ => panic!()
+    match key {
 
-        };
+        Key::Ctrl(b'q') => {
+            editor_clean_screen(&mut stdout())?;
+            return Ok(false);
+        },
+        Key::Up | Key::Down | Key::Right | Key::Left => editor_move_cursor(key, &mut conf),
 
-        editor_move_cursor(key, &mut conf);
+        Key::PageDown => for _ in 0..conf.height {
+                editor_move_cursor(Key::Down, &mut conf)
+        },
+        Key::PageUp => for _ in 0..conf.height {
+                editor_move_cursor(Key::Up, &mut conf)
+        },
+        Key::Home => conf.cy = 0,
+        Key::End => conf.cy = conf.height - 1,
+
+        _ => {}
     }
 
     return Ok(true);
@@ -88,7 +153,6 @@ fn editor_move_cursor(key: Key, conf: &mut EditorConfig) {
         Key::Up => if conf.cy != 0 { conf.cy-=1 },
         Key::Right => if conf.cx != conf.width { conf.cx+=1 },
         _ => {}
-
     }
 
 }
@@ -113,25 +177,29 @@ fn editor_refresh_screen(out: &mut impl Write, conf: &mut EditorConfig) -> io!((
 fn editor_draw_rows(out: &mut impl Write, conf: &EditorConfig) -> io!(()) {
 
     for y in 0..conf.height {
-        if y == conf.height / 3 {
-            let text = format!("{} editor -- version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-            let w = std::cmp::min(text.len(), conf.width);
+        if y >= conf.numrows {
+            if y == conf.height / 3 {
+                let text = format!("{} editor -- version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                let w = std::cmp::min(text.len(), conf.width);
 
-            let mut space: Vec<u8> = iter::repeat(b' ')
-                .take((conf.width - w) / 2)
-                .collect(); 
+                let mut space: Vec<u8> = iter::repeat(b' ')
+                    .take((conf.width - w) / 2)
+                    .collect(); 
 
-            space[0] = b'~';
+                space[0] = b'~';
 
-            out.write(&space)?;
-            out.write(text[..w].as_bytes())?;
-            
-
-        } 
-        else {
-            out.write(b"~")?;
+                out.write(&space)?;
+                out.write(text[..w].as_bytes())?;
+            } 
+            else {
+                out.write(b"~")?;
+            }
         }
-        out.write(b"\x1b[0K")?;
+        else {
+            let len = std::cmp::min(conf.row.size, conf.width);
+            out.write(conf.row.chars[..len].as_bytes())?;
+        }
+        out.write(b"\x1b[K")?;
         
         if y != conf.height - 1 {
             out.write(b"\r\n")?;
@@ -183,6 +251,14 @@ fn get_window_size() -> io!((usize, usize)) {
     return Ok(dim);
 }
 
+fn editor_open(conf: &mut EditorConfig) {
+
+    let text = "Ninja og bolle";
+    conf.row.chars = String::from(text);
+    conf.row.size = text.len();
+    conf.numrows = 1;
+}
+
 fn editor_init() -> io!(EditorConfig) {
 
     let termios = enable_raw_mode()?;
@@ -191,6 +267,11 @@ fn editor_init() -> io!(EditorConfig) {
     let conf = EditorConfig {
         cx: 0,
         cy: 0,
+        numrows: 0,
+        row: Row {
+            chars: String::new(), 
+            size: 0,
+        },
         height: h,
         width: w,
         orig_termios: termios
@@ -230,6 +311,7 @@ fn run() -> io!(()) {
    let mut conf = editor_init()?;
    let mut out = stdout(); //io::BufWriter::new(stdout());
     
+   editor_open(&mut conf);
    
    loop {
        editor_refresh_screen(&mut out, &mut conf)?;
