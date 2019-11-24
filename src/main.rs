@@ -114,7 +114,7 @@ fn editor_draw_rows(out: &mut impl Write, conf: &EditorConfig) -> io!(()) {
 
     for y in 0..conf.height {
         if y == conf.height / 3 {
-            let text = format!("Rilo Editor -- version {}", env!("CARGO_PKG_VERSION"));
+            let text = format!("{} editor -- version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             let w = std::cmp::min(text.len(), conf.width);
 
             let mut space: Vec<u8> = iter::repeat(b' ')

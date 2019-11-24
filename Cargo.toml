@@ -1,5 +1,5 @@
 [package]
-name = "rilo"
+name = "kiko"
 version = "0.1.0"
 authors = ["Ole Ravna <olevra@stud.ntnu.no>"]
 edition = "2018"
