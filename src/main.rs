@@ -1,6 +1,7 @@
 use std::{
     iter,
     env,
+    string::String,
     fs::File,
     io::{self, prelude::*, stdin, stdout, stderr, Read, Write, BufReader},
 };
@@ -32,7 +33,6 @@ enum Key {
 const STDIN_FD: i32 = 0;
 
 struct Row {
-    size: usize,
     chars: String,
 }
 
@@ -42,7 +42,7 @@ struct EditorConfig {
     height: usize,
     width: usize,
     numrows: usize,
-    row: Row,
+    rows: Vec<Row>,
     orig_termios: Termios
 }
 
@@ -200,8 +200,8 @@ fn editor_draw_rows(out: &mut impl Write, conf: &EditorConfig) -> io!(()) {
             }
         }
         else {
-            let len = std::cmp::min(conf.row.size, conf.width);
-            out.write(conf.row.chars[..len].as_bytes())?;
+            let len = std::cmp::min(conf.rows[y].chars.len(), conf.width);
+            out.write(conf.rows[y].chars[..len].as_bytes())?;
         }
         out.write(b"\x1b[K")?;
         
@@ -257,24 +257,26 @@ fn get_window_size() -> io!((usize, usize)) {
 
 fn editor_open(filename: String, conf: &mut EditorConfig) {
 
-    let mut file = match File::open(filename) {
+    let file = match File::open(filename) {
         Ok(f) => BufReader::new(f),   // with_capacity
         Err(e) => panic!(e),
     };
     
-    let mut buf = String::new();
+    // let mut buf = String::new();
     // let line = file.read_line(
-    if let Ok(len) = file.read_line(&mut buf) {
-        let line = buf.trim();
+    // file.read_to_string(&mut buf).expect("fak");
 
-        conf.row.chars = line.to_string(); 
-        conf.row.size = conf.row.chars.len(); 
+    for b in file.lines() {
+        // if len == 0 { break; }
+        let line = b.unwrap().to_string();
+        conf.rows.push(Row { chars: line }); 
+        // print!("{}", buf); 
     }
 
     // conf.row.chars = String::from("Ninja og bolle");
     // conf.row.size = conf.row.chars.len();
-    conf.numrows = 1;
-    drop(file);
+    conf.numrows = conf.rows.len();
+    // drop(file);
 }
 
 fn editor_init() -> io!(EditorConfig) {
@@ -286,10 +288,7 @@ fn editor_init() -> io!(EditorConfig) {
         cx: 0,
         cy: 0,
         numrows: 0,
-        row: Row {
-            chars: String::new(), 
-            size: 0,
-        },
+        rows: vec![],
         height: h,
         width: w,
         orig_termios: termios
