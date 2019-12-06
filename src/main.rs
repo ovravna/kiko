@@ -1,5 +1,3 @@
-//kake er godt!
-
 use std::{
     iter,
     env,
