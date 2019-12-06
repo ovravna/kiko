@@ -1,6 +1,12 @@
-use std::io::{stdin, stdout, stderr, Read, Write};
-use std::io;
-use std::iter;
+//kake er godt!
+
+use std::{
+    iter,
+    env,
+    fs::File,
+    io::{self, prelude::*, stdin, stdout, stderr, Read, Write, BufReader},
+};
+
 use termios::*;
 use ascii; 
 
@@ -251,12 +257,26 @@ fn get_window_size() -> io!((usize, usize)) {
     return Ok(dim);
 }
 
-fn editor_open(conf: &mut EditorConfig) {
+fn editor_open(filename: String, conf: &mut EditorConfig) {
 
-    let text = "Ninja og bolle";
-    conf.row.chars = String::from(text);
-    conf.row.size = text.len();
+    let mut file = match File::open(filename) {
+        Ok(f) => BufReader::new(f),   // with_capacity
+        Err(e) => panic!(e),
+    };
+    
+    let mut buf = String::new();
+    // let line = file.read_line(
+    if let Ok(len) = file.read_line(&mut buf) {
+        let line = buf.trim();
+
+        conf.row.chars = line.to_string(); 
+        conf.row.size = conf.row.chars.len(); 
+    }
+
+    // conf.row.chars = String::from("Ninja og bolle");
+    // conf.row.size = conf.row.chars.len();
     conf.numrows = 1;
+    drop(file);
 }
 
 fn editor_init() -> io!(EditorConfig) {
@@ -304,14 +324,16 @@ fn test_ctrl_key() {
     assert_eq!(ctrl_key(b'a'), 1);
 }
 
-fn run() -> io!(()) {
+fn run(filename: String) -> io!(()) {
 
     
 
    let mut conf = editor_init()?;
    let mut out = stdout(); //io::BufWriter::new(stdout());
     
-   editor_open(&mut conf);
+   // let s = "src/main.rs";
+
+   editor_open(filename, &mut conf);
    
    loop {
        editor_refresh_screen(&mut out, &mut conf)?;
@@ -351,7 +373,9 @@ fn enable_raw_mode() -> io!(Termios) {
 }
 
 fn main() {
-    match run() {
+    // println!("{:?}", env::args());
+    let args = env::args().last().expect("failed");
+    match run(args) {
         Ok(_) => {},
         Err(err) => {
             editor_clean_screen(&mut stdout()).expect("fail");
