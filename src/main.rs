@@ -1,6 +1,7 @@
 use std::{
     iter,
     env,
+    cmp::min,
     string::String,
     fs::File,
     io::{self, prelude::*, stdin, stdout, stderr, Read, Write, BufReader},
@@ -39,6 +40,7 @@ struct Row {
 struct EditorConfig {
     cx: usize,
     cy: usize,
+    rowoff: usize,
     height: usize,
     width: usize,
     numrows: usize,
@@ -153,7 +155,7 @@ fn editor_clean_screen(out: &mut impl Write) -> io!(()) {
 fn editor_move_cursor(key: Key, conf: &mut EditorConfig) {
     match key {
         Key::Left => if conf.cx != 0 { conf.cx-=1 }, 
-        Key::Down => if conf.cy != conf.height - 1 { conf.cy+=1 },
+        Key::Down => if conf.cy < conf.numrows - 1 { conf.cy+=1 },
         Key::Up => if conf.cy != 0 { conf.cy-=1 },
         Key::Right => if conf.cx != conf.width { conf.cx+=1 },
         _ => {}
@@ -163,12 +165,14 @@ fn editor_move_cursor(key: Key, conf: &mut EditorConfig) {
 
 fn editor_refresh_screen(out: &mut impl Write, conf: &mut EditorConfig) -> io!(()) {
 
+    editor_scroll(conf);
+
     out.write(b"\x1b[?25l")?;
     out.write(b"\x1b[H")?;
 
     editor_draw_rows(out, conf)?;
 
-    let curs_pos = format!("\x1b[{};{}H", conf.cy + 1, conf.cx + 1); 
+    let curs_pos = format!("\x1b[{};{}H", conf.cy - conf.rowoff + 1, conf.cx + 1); 
     out.write(curs_pos.as_bytes())?;
 
     // move_cursor(conf.cx + 1, conf.cy + 1)?;
@@ -178,13 +182,23 @@ fn editor_refresh_screen(out: &mut impl Write, conf: &mut EditorConfig) -> io!((
     Ok(())
 }
 
+fn editor_scroll(conf: &mut EditorConfig) {
+    if conf.cy < conf.rowoff {
+        conf.rowoff = conf.cy;
+    }
+    if conf.cy >= conf.rowoff + conf.height {
+        conf.rowoff = conf.cy - conf.height + 1
+    }
+}
+
 fn editor_draw_rows(out: &mut impl Write, conf: &EditorConfig) -> io!(()) {
 
     for y in 0..conf.height {
-        if y >= conf.numrows {
+        let filerow = y + conf.rowoff;
+        if filerow >= conf.numrows {
             if y == conf.height / 3 {
                 let text = format!("{} editor -- version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-                let w = std::cmp::min(text.len(), conf.width);
+                let w = min(text.len(), conf.width);
 
                 let mut space: Vec<u8> = iter::repeat(b' ')
                     .take((conf.width - w) / 2)
@@ -200,8 +214,9 @@ fn editor_draw_rows(out: &mut impl Write, conf: &EditorConfig) -> io!(()) {
             }
         }
         else {
-            let len = std::cmp::min(conf.rows[y].chars.len(), conf.width);
-            out.write(conf.rows[y].chars[..len].as_bytes())?;
+            let row = &conf.rows[filerow];
+            let len = min(row.chars.len(), conf.width);
+            out.write(row.chars[..len].as_bytes())?;
         }
         out.write(b"\x1b[K")?;
         
@@ -287,6 +302,7 @@ fn editor_init() -> io!(EditorConfig) {
     let conf = EditorConfig {
         cx: 0,
         cy: 0,
+        rowoff: 0,
         numrows: 0,
         rows: vec![],
         height: h,
